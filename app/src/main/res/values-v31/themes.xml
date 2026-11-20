@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Android 12+ рисует свою заставку при запуске: фон и иконку приложения.
+      Иконка здесь не нужна — на чёрном фоне она единственное, что видно, и
+      перекрывает первый кадр приложения. Поэтому фон чёрный, иконка прозрачная,
+      длительность анимации нулевая: заставка — просто чёрный экран.
+
+      Стиль продублирован целиком, а не унаследован: в values-v31 нужен тот же
+      набор, что в values, плюс три атрибута, которых нет на старых Android.
+    -->
+    <style name="Theme.OnlyNote" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowSplashScreenBackground">@color/window_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="android:windowSplashScreenAnimationDuration">0</item>
+    </style>
+</resources>

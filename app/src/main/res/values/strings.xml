@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OnlyNote</string>
+
+    <!-- Действия -->
+    <string name="action_new_note">Новая заметка</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="new_folder_option">Новая папка</string>
+    <string name="action_delete">Удалить</string>
+    <string name="action_import">Импортировать</string>
+
+    <!-- Подсказки -->
+    <string name="hint_folder_name">Название папки</string>
+    <string name="untitled_note">Без названия</string>
+
+    <!-- Потолок длины заметки -->
+    <string name="limit_reached">Предел заметки — 150 000 знаков</string>
+
+    <!-- Поиск -->
+    <string name="search_hint">Найти в заметке</string>
+    <string name="search_prev">Предыдущее совпадение</string>
+    <string name="search_next">Следующее совпадение</string>
+
+    <!-- Нижние листы -->
+
+    <!-- Резервные копии -->
+    <string name="backup_title">Резервная копия</string>
+    <string name="backup_export">Экспорт</string>
+    <string name="backup_import">Импорт</string>
+    <string name="backup_empty">Копий не найдено.</string>
+    <string name="backup_done">Готово</string>
+    <string name="backup_export_failed">Не удалось сохранить копию</string>
+    <string name="backup_import_failed">Не удалось прочитать копию</string>
+
+    <!-- Названия цветов -->
+    <string name="color_default">Без цвета</string>
+    <string name="color_rose">Роза</string>
+    <string name="color_peach">Персик</string>
+    <string name="color_lemon">Лимон</string>
+    <string name="color_sage">Шалфей</string>
+    <string name="color_blue">Синий</string>
+    <string name="color_lavender">Лаванда</string>
+    <string name="color_gray">Серый</string>
+</resources>
