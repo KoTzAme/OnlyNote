@@ -6,7 +6,7 @@ import java.util.Locale
 /**
  * Фиксированная палитра: цвета радуги плюс нейтральные варианты.
  *
- * [rank] задаёт место в радуге — по нему сортируются заметки в папке:
+ * [rank] задаёт место в радуге — по нему сортируются заметки на экране:
  * красный → оранжевый → жёлтый → зелёный → синий → фиолетовый,
  * затем песочный и «без цвета» (у них нет места в радуге).
  */
@@ -41,24 +41,21 @@ enum class NoteColor(val id: String, val rank: Int) {
 fun String.noteHeading(): String =
     lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
 
-data class Folder(
-    val id: Long,
-    val name: String,
-    val createdAt: Long,
-)
-
 /**
  * Заметка — это просто текст. Заголовок не хранится отдельно:
  * им считается первая непустая строка.
  *
  * [heading] считается один раз при создании объекта: заметки бывают по сто тысяч
  * символов, а заголовок спрашивают на каждой сортировке и на каждой строке списка.
+ *
+ * [archived] — на каком из двух главных экранов живёт заметка: рабочий или архив.
+ * Категоризация при этом держится на цвете, а не на структуре.
  */
 data class Note(
     val id: Long,
-    val folderId: Long,
     val body: String,
     val color: NoteColor,
+    val archived: Boolean,
     val createdAt: Long,
     val updatedAt: Long,
 ) {
@@ -67,10 +64,10 @@ data class Note(
 }
 
 data class AppSnapshot(
-    val folders: List<Folder> = emptyList(),
     val notes: List<Note> = emptyList(),
 ) {
-    fun folder(folderId: Long): Folder? = folders.firstOrNull { it.id == folderId }
+    /** Заметки одного из двух экранов: рабочий (`false`) или архив (`true`). */
+    fun notes(archived: Boolean): List<Note> = notes.filter { it.archived == archived }
 }
 
 /**

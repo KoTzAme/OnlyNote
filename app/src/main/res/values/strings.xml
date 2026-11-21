@@ -5,12 +5,10 @@
     <!-- Действия -->
     <string name="action_new_note">Новая заметка</string>
     <string name="action_cancel">Отмена</string>
-    <string name="new_folder_option">Новая папка</string>
     <string name="action_delete">Удалить</string>
     <string name="action_import">Импортировать</string>
 
     <!-- Подсказки -->
-    <string name="hint_folder_name">Название папки</string>
     <string name="untitled_note">Без названия</string>
 
     <!-- Потолок длины заметки -->
@@ -20,8 +18,6 @@
     <string name="search_hint">Найти в заметке</string>
     <string name="search_prev">Предыдущее совпадение</string>
     <string name="search_next">Следующее совпадение</string>
-
-    <!-- Нижние листы -->
 
     <!-- Резервные копии -->
     <string name="backup_title">Резервная копия</string>

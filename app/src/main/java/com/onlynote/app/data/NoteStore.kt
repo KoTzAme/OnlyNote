@@ -7,60 +7,38 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import java.text.Collator
-import java.util.Locale
 
 /**
- * Всё хранилище приложения: папки и заметки.
+ * Всё хранилище приложения: заметки и их принадлежность одному из двух экранов.
  *
- * Папка без заметок не имеет смысла, поэтому такие папки подчищаются:
- * удалили последнюю заметку — папка исчезла вместе с ней.
+ * Папок нет: главная категоризация — цвет. Экран (рабочий или архив) — это
+ * один флаг у заметки, поэтому перемещение между экранами — обычная правка.
  */
 class NoteStore(context: Context) {
 
     private val helper = NoteDatabase(context.applicationContext)
-    private val collator = Collator.getInstance(Locale("ru", "RU"))
 
     private val _snapshot = MutableStateFlow(AppSnapshot())
     val snapshot: StateFlow<AppSnapshot> = _snapshot.asStateFlow()
 
     suspend fun load() = withContext(Dispatchers.IO) {
-        purgeEmptyFolders()
-        _snapshot.value = readAll()
-    }
-
-    // ---------- папки ----------
-
-    suspend fun createFolder(name: String): Long = withContext(Dispatchers.IO) {
-        val clean = name.trim()
-        require(clean.isNotEmpty()) { "folder name cannot be blank" }
-        val values = ContentValues().apply {
-            put("name", clean)
-            put("created_at", System.currentTimeMillis())
-        }
-        val id = helper.writableDatabase.insert("folders", null, values)
-        refresh()
-        id
-    }
-
-    suspend fun renameFolder(folderId: Long, name: String) = withContext(Dispatchers.IO) {
-        val clean = name.trim()
-        if (clean.isEmpty()) return@withContext
-        val values = ContentValues().apply { put("name", clean) }
-        helper.writableDatabase.update("folders", values, "_id = ?", arrayOf(folderId.toString()))
         refresh()
     }
 
     // ---------- заметки ----------
 
-    suspend fun createNote(folderId: Long, color: NoteColor = NoteColor.DEFAULT): Long =
+    /**
+     * Новая заметка появляется на том экране, откуда её создали: [archived]
+     * приходит из того экрана, на котором был долгий тап.
+     */
+    suspend fun createNote(archived: Boolean, color: NoteColor = NoteColor.DEFAULT): Long =
         withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()
             val values = ContentValues().apply {
-                put("folder_id", folderId)
                 put("title", "")
                 put("body", "")
                 put("color", color.id)
+                put("archived", if (archived) 1 else 0)
                 put("created_at", now)
                 put("updated_at", now)
             }
@@ -77,11 +55,13 @@ class NoteStore(context: Context) {
         noteId: Long,
         body: String? = null,
         color: NoteColor? = null,
+        archived: Boolean? = null,
     ) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val values = ContentValues().apply {
             if (body != null) put("body", body)
             if (color != null) put("color", color.id)
+            if (archived != null) put("archived", if (archived) 1 else 0)
             put("updated_at", now)
         }
         helper.writableDatabase.update("notes", values, "_id = ?", arrayOf(noteId.toString()))
@@ -89,6 +69,7 @@ class NoteStore(context: Context) {
             note.copy(
                 body = body ?: note.body,
                 color = color ?: note.color,
+                archived = archived ?: note.archived,
                 updatedAt = now,
             )
         }
@@ -96,7 +77,6 @@ class NoteStore(context: Context) {
 
     suspend fun deleteNote(noteId: Long) = withContext(Dispatchers.IO) {
         helper.writableDatabase.delete("notes", "_id = ?", arrayOf(noteId.toString()))
-        purgeEmptyFolders()
         refresh()
     }
 
@@ -111,43 +91,25 @@ class NoteStore(context: Context) {
         db.beginTransaction()
         try {
             db.delete("notes", null, null)
-            db.delete("folders", null, null)
-            val folderIds = LongArray(data.folders.size)
-            data.folders.forEachIndexed { index, folder ->
-                val values = ContentValues().apply {
-                    put("name", folder.name)
-                    put("created_at", folder.createdAt)
-                }
-                folderIds[index] = db.insert("folders", null, values)
-            }
             data.notes.forEach { note ->
-                if (note.folderIndex in folderIds.indices) {
-                    val values = ContentValues().apply {
-                        put("folder_id", folderIds[note.folderIndex])
-                        put("title", "")
-                        put("body", note.body)
-                        put("color", NoteColor.fromId(note.color).id)
-                        put("created_at", note.createdAt)
-                        put("updated_at", note.updatedAt)
-                    }
-                    db.insert("notes", null, values)
+                val values = ContentValues().apply {
+                    put("title", "")
+                    put("body", note.body)
+                    put("color", NoteColor.fromId(note.color).id)
+                    put("archived", if (note.archived) 1 else 0)
+                    put("created_at", note.createdAt)
+                    put("updated_at", note.updatedAt)
                 }
+                db.insert("notes", null, values)
             }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
-        purgeEmptyFolders()
         refresh()
     }
 
     // ---------- чтение ----------
-
-    private fun purgeEmptyFolders() {
-        helper.writableDatabase.execSQL(
-            "DELETE FROM folders WHERE _id NOT IN (SELECT folder_id FROM notes)",
-        )
-    }
 
     /**
      * Заметка правится в памяти после записи в базу. Пересортировка нужна только
@@ -176,60 +138,40 @@ class NoteStore(context: Context) {
 
     private fun readAll(): AppSnapshot {
         val db = helper.readableDatabase
-
-        val folders = mutableListOf<Folder>()
-        db.rawQuery("SELECT _id, name, created_at FROM folders", null).use { cursor ->
-            while (cursor.moveToNext()) {
-                folders += Folder(
-                    id = cursor.getLong(0),
-                    name = cursor.getString(1),
-                    createdAt = cursor.getLong(2),
-                )
-            }
-        }
-        folders.sortWith { a, b -> collator.compare(a.name, b.name) }
-
         val notes = mutableListOf<Note>()
         db.rawQuery(
-            "SELECT _id, folder_id, body, color, created_at, updated_at FROM notes",
+            "SELECT _id, body, color, archived, created_at, updated_at FROM notes",
             null,
         ).use { cursor ->
             while (cursor.moveToNext()) {
                 notes += Note(
                     id = cursor.getLong(0),
-                    folderId = cursor.getLong(1),
-                    body = cursor.getString(2),
-                    color = NoteColor.fromId(cursor.getString(3)),
+                    body = cursor.getString(1),
+                    color = NoteColor.fromId(cursor.getString(2)),
+                    archived = cursor.getInt(3) != 0,
                     createdAt = cursor.getLong(4),
                     updatedAt = cursor.getLong(5),
                 )
             }
         }
         notes.sortWith(NoteOrdering.comparator)
-
-        return AppSnapshot(folders = folders, notes = notes)
+        return AppSnapshot(notes = notes)
     }
 
     private fun refresh() {
         _snapshot.value = readAll()
     }
 
-    private fun AppSnapshot.toBackupData(): BackupData {
-        val indexById = folders.withIndex().associate { (index, folder) -> folder.id to index }
-        return BackupData(
-            createdAt = System.currentTimeMillis(),
-            folders = folders.map { BackupFolder(name = it.name, createdAt = it.createdAt) },
-            notes = notes
-                .filter { indexById.containsKey(it.folderId) }
-                .map {
-                    BackupNote(
-                        folderIndex = indexById.getValue(it.folderId),
-                        body = it.body,
-                        color = it.color.id,
-                        createdAt = it.createdAt,
-                        updatedAt = it.updatedAt,
-                    )
-                },
-        )
-    }
+    private fun AppSnapshot.toBackupData(): BackupData = BackupData(
+        createdAt = System.currentTimeMillis(),
+        notes = notes.map {
+            BackupNote(
+                body = it.body,
+                color = it.color.id,
+                archived = it.archived,
+                createdAt = it.createdAt,
+                updatedAt = it.updatedAt,
+            )
+        },
+    )
 }

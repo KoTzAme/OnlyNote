@@ -26,17 +26,9 @@ class OnlyNoteViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    /** Новая папка создаётся только вместе с первой заметкой — пустых папок не бывает. */
-    fun createFolder(name: String, onCreated: (Long) -> Unit) {
-        viewModelScope.launch { onCreated(store.createFolder(name)) }
-    }
-
-    fun renameFolder(folderId: Long, name: String) {
-        viewModelScope.launch { store.renameFolder(folderId, name) }
-    }
-
-    fun createNote(folderId: Long, onCreated: (Long) -> Unit) {
-        viewModelScope.launch { onCreated(store.createNote(folderId)) }
+    /** Заметка создаётся на том экране, откуда её позвали: рабочий или архив. */
+    fun createNote(archived: Boolean, onCreated: (Long) -> Unit) {
+        viewModelScope.launch { onCreated(store.createNote(archived)) }
     }
 
     fun saveNote(noteId: Long, body: String) {
@@ -45,6 +37,11 @@ class OnlyNoteViewModel(application: Application) : AndroidViewModel(application
 
     fun setColor(noteId: Long, color: NoteColor) {
         viewModelScope.launch { store.updateNote(noteId, color = color) }
+    }
+
+    /** Перемещение между двумя главными экранами. */
+    fun setArchived(noteId: Long, archived: Boolean) {
+        viewModelScope.launch { store.updateNote(noteId, archived = archived) }
     }
 
     fun deleteNote(noteId: Long) {

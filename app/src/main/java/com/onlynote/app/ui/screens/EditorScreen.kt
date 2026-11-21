@@ -34,12 +34,10 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,15 +51,12 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.onlynote.app.R
@@ -71,13 +66,14 @@ import com.onlynote.app.data.noteHeading
 import com.onlynote.app.ui.components.ColorPickerContent
 import com.onlynote.app.ui.components.EditHistory
 import com.onlynote.app.ui.components.WindowScrim
-import com.onlynote.app.ui.folderTitle
 import com.onlynote.app.ui.theme.SECONDARY_ALPHA
 import com.onlynote.app.ui.theme.skin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 /**
  * Заметка в двух режимах — поверх одного нативного поля.
@@ -92,7 +88,6 @@ import kotlinx.coroutines.withContext
 @Composable
 fun EditorScreen(
     note: Note,
-    folderName: String,
     isNew: Boolean,
     onBack: () -> Unit,
     onSave: (body: String) -> Unit,
@@ -103,7 +98,6 @@ fun EditorScreen(
     val density = LocalDensity.current
     val focusManager = LocalFocusManager.current
     val limitText = stringResource(R.string.limit_reached)
-    val untitled = stringResource(R.string.untitled_note)
 
     // 3.8 в редакторе не показывала один завершающий перевод строки: иначе внизу
     // появлялась пустая строка — чёрная полоса над клавиатурой. Держим так же:
@@ -333,9 +327,7 @@ fun EditorScreen(
                 .imePadding(),
         ) {
             EditorHeader(
-                folderName = folderName,
                 heading = heading,
-                untitled = untitled,
                 textStyle = textStyle,
                 tint = skin.onEditor,
                 editing = editing,
@@ -424,14 +416,12 @@ fun EditorScreen(
  *
  * Значков в шапке нет вовсе. В просмотре тап открывает правку с конца, долгий
  * тап делит шапку пополам: слева цвет, справа поиск. В правке тап по левой
- * половине — отмена, по правой — повтор, а долгих нажатий там нет: два жеста
- * на одно место читались бы как одно и то же.
+ * половине — отмена, по правой — повтор; долгие нажатия работают в обоих
+ * режимах: цвет и поиск нужны и там, и там.
  */
 @Composable
 private fun EditorHeader(
-    folderName: String,
     heading: androidx.compose.runtime.State<String>,
-    untitled: String,
     textStyle: TextStyle,
     tint: Color,
     editing: Boolean,
@@ -441,29 +431,16 @@ private fun EditorHeader(
     onSearch: () -> Unit,
     onColor: () -> Unit,
 ) {
-    val title = remember(folderName, heading.value, untitled, tint) {
-        buildAnnotatedString {
-            withStyle(
-                SpanStyle(
-                    color = tint.copy(alpha = SECONDARY_ALPHA),
-                    // 4.9: имя папки в шапке — SemiBold, как и в списке: это
-                    // подпись группы, а не текст заметки.
-                    fontWeight = FontWeight.SemiBold,
-                ),
-            ) {
-                append(folderName.folderTitle())
-            }
-            append("   ")
-            append(heading.value.ifBlank { untitled })
-        }
-    }
+    // Папок больше нет, а пустая заметка не показывает в шапке заглушку:
+    // пока не написана первая строка, шапка пустая.
+    val title = heading.value
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
-            // Шапка низкая нарочно: имя папки и заголовок стоят вплотную к разделителю.
+            // Шапка низкая нарочно: заголовок стоит вплотную к разделителю.
             .height(HEADER_HEIGHT)
             .pointerInput(editing) {
                 detectTapGestures(
@@ -475,6 +452,9 @@ private fun EditorHeader(
                         }
                     },
                     onLongPress = { offset ->
+                        // Долгие нажатия только в просмотре: в правке они мешали —
+                        // палец после выделения уходит на цвет и поиск вместо
+                        // отмены и повтора.
                         if (!editing) {
                             if (offset.x < size.width / 2f) onColor() else onSearch()
                         }
@@ -486,7 +466,9 @@ private fun EditorHeader(
     ) {
         Text(
             text = title,
-            style = textStyle,
+            // 1.1: название в шапке — SemiBold, в списке — Regular. Шапка
+            // одна на экране и работает как заголовок, список читается строками.
+            style = textStyle.copy(fontWeight = FontWeight.SemiBold),
             color = tint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

@@ -1,63 +1,39 @@
 package com.onlynote.app.ui.components
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import android.os.SystemClock
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import kotlinx.coroutines.delay
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.onlynote.app.R
 import com.onlynote.app.ui.theme.APP_FONT_SCALE
 import com.onlynote.app.ui.theme.HOME_SCALE
+import androidx.compose.runtime.getValue
 
 /** Сколько клавиатура должна простоять, чтобы её уход считался уходом. */
 private const val IME_SETTLE_MS = 400L
@@ -155,109 +131,6 @@ private fun DialogAnswers(
                 },
             )
         }
-    }
-}
-
-/**
- * Название папки — одна строка прямо над клавиатурой, и больше ничего.
- *
- * Это не окно: строка живёт поверх экрана и поднимается вместе с клавиатурой,
- * поэтому ведёт себя как обычная панель ввода, а не как карточка. «Ввод» на
- * клавиатуре принимает, системный «назад» (или касание мимо) отменяет.
- */
-@Composable
-fun FolderNameBar(
-    initialValue: String = "",
-    existingNames: List<String> = emptyList(),
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    // Курсор сразу за названием: переименование обычно дописывают, а не
-            // начинают заново.
-    var value by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(initialValue, TextRange(initialValue.length)))
-    }
-    val focusRequester = remember { FocusRequester() }
-    val trimmed = value.text.trim()
-    val duplicate = trimmed.isNotEmpty() && existingNames.any { it.equals(trimmed, ignoreCase = true) }
-    val valid = trimmed.isNotEmpty() && !duplicate
-    val confirm = { if (valid) onConfirm(trimmed) }
-
-    BackHandler { onDismiss() }
-
-    // Окно листа папок закрывается с анимацией и на миг держит фокус окна:
-    // первый запрос фокуса может уйти в никуда, и клавиатура не выезжает.
-    // Поэтому просим фокус несколько раз подряд.
-    LaunchedEffect(Unit) {
-        repeat(3) { attempt ->
-            if (attempt > 0) delay(120L)
-            focusRequester.requestFocus()
-        }
-    }
-
-    // Клавиатуру убрали — строка закрывается вместе с ней, а не следующим
-    // «назад». Но уход клавиатуры сразу после открытия не в счёт: это лист папок
-    // доигрывает анимацию и уносит клавиатуру с собой.
-    val density = LocalDensity.current
-    val ime = WindowInsets.ime
-    val openedAt = remember { SystemClock.uptimeMillis() }
-    var imeSince by remember { mutableStateOf(0L) }
-    LaunchedEffect(ime, density) {
-        snapshotFlow { ime.getBottom(density) > 0 }.collect { visible ->
-            val now = SystemClock.uptimeMillis()
-            if (visible) {
-                if (imeSince == 0L) imeSince = now
-            } else if (imeSince != 0L) {
-                val steady = now - openedAt > IME_SETTLE_MS && now - imeSince > IME_SETTLE_MS
-                imeSince = 0L
-                if (steady) onDismiss()
-            }
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding(),
-        contentAlignment = Alignment.BottomStart,
-    ) {
-        // Касание мимо строки — та же отмена, что «назад».
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) { detectTapGestures { onDismiss() } },
-        )
-        BasicTextField(
-            value = value,
-            onValueChange = { next -> if (next.text.length <= 60) value = next },
-            textStyle = windowTextStyle().copy(color = MaterialTheme.colorScheme.onSurface),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Done,
-            ),
-            keyboardActions = KeyboardActions(onDone = { confirm() }),
-            modifier = Modifier
-                .fillMaxWidth()
-                // Свой фон обязателен: строка висит над списком, и без него
-                // название папки просвечивало сквозь набираемый текст.
-                .background(MaterialTheme.colorScheme.background)
-                .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 18.dp)
-                .focusRequester(focusRequester),
-            decorationBox = { inner ->
-                Box {
-                    if (value.text.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.hint_folder_name),
-                            style = windowTextStyle(),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    inner()
-                }
-            },
-        )
     }
 }
 

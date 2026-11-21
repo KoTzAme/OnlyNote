@@ -3,20 +3,23 @@ package com.onlynote.app.data
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class BackupFolder(val name: String, val createdAt: Long)
-
 data class BackupNote(
-    val folderIndex: Int,
     val body: String,
     val color: String,
+    val archived: Boolean,
     val createdAt: Long,
     val updatedAt: Long,
 )
 
-/** Всё содержимое приложения в переносимом виде. */
+/**
+ * Всё содержимое приложения в переносимом виде.
+ *
+ * Копии версии 1 знали папки: у заметки там был `folder`, а рядом лежал массив
+ * `folders`. Такие файлы читаются по-прежнему — структура просто игнорируется,
+ * заметки встают на рабочий экран. Свои копии пишутся без папок.
+ */
 data class BackupData(
     val createdAt: Long,
-    val folders: List<BackupFolder>,
     val notes: List<BackupNote>,
 ) {
     fun toJson(): String = JSONObject().apply {
@@ -24,27 +27,14 @@ data class BackupData(
         put("version", VERSION)
         put("createdAt", createdAt)
         put(
-            "folders",
-            JSONArray().apply {
-                folders.forEach { folder ->
-                    put(
-                        JSONObject().apply {
-                            put("name", folder.name)
-                            put("createdAt", folder.createdAt)
-                        },
-                    )
-                }
-            },
-        )
-        put(
             "notes",
             JSONArray().apply {
                 notes.forEach { note ->
                     put(
                         JSONObject().apply {
-                            put("folder", note.folderIndex)
                             put("body", note.body)
                             put("color", note.color)
+                            put("archived", note.archived)
                             put("createdAt", note.createdAt)
                             put("updatedAt", note.updatedAt)
                         },
@@ -56,34 +46,26 @@ data class BackupData(
 
     companion object {
         private const val FORMAT = "onlynote-backup"
-        private const val VERSION = 1
+        private const val VERSION = 2
 
         /** @return null, если файл не похож на резервную копию OnlyNote. */
         fun fromJson(raw: String): BackupData? {
             val root = runCatching { JSONObject(raw) }.getOrNull() ?: return null
             if (root.optString("format") != FORMAT) return null
-
-            val foldersJson = root.optJSONArray("folders") ?: JSONArray()
-            val folders = buildList {
-                for (index in 0 until foldersJson.length()) {
-                    val item = foldersJson.optJSONObject(index) ?: continue
-                    val name = item.optString("name").trim()
-                    if (name.isEmpty()) continue
-                    add(BackupFolder(name = name, createdAt = item.optLong("createdAt")))
-                }
-            }
+            // Копия версии 1 без папок бессмысленна: заметок в ней нет.
+            val hasNotes = root.has("notes")
+            if (!hasNotes) return null
 
             val notesJson = root.optJSONArray("notes") ?: JSONArray()
             val notes = buildList {
                 for (index in 0 until notesJson.length()) {
                     val item = notesJson.optJSONObject(index) ?: continue
-                    val folderIndex = item.optInt("folder", -1)
-                    if (folderIndex !in folders.indices) continue
                     add(
                         BackupNote(
-                            folderIndex = folderIndex,
                             body = item.optString("body"),
                             color = item.optString("color", "default"),
+                            // В старых копиях архива не было — всё на рабочем экране.
+                            archived = item.optBoolean("archived", false),
                             createdAt = item.optLong("createdAt"),
                             updatedAt = item.optLong("updatedAt"),
                         ),
@@ -93,7 +75,6 @@ data class BackupData(
 
             return BackupData(
                 createdAt = root.optLong("createdAt"),
-                folders = folders,
                 notes = notes,
             )
         }

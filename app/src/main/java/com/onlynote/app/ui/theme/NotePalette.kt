@@ -48,8 +48,10 @@ private val skins: Map<NoteColor, NoteSkin> = mapOf(
         accent = Color(0xFFFFD23F),
         onEditor = Color(0xFFFFF3CB).muted(),
     ),
+    // 1.1: насыщенность шалфея поднята на 25 % (HSL 0,48 → 0,60) —
+    // на чёрном он читался как серо-зелёный.
     NoteColor.SAGE to NoteSkin(
-        accent = Color(0xFF9BCB6B),
+        accent = Color(0xFF9BD75F),
         onEditor = Color(0xFFE9F6D9).muted(),
     ),
     NoteColor.BLUE to NoteSkin(

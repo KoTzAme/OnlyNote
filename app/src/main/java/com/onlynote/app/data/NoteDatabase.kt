@@ -5,8 +5,10 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 /**
- * Локальная база: две таблицы, без синхронизации.
- * Папка без заметок не имеет смысла — такие подчищаются в [NoteStore].
+ * Локальная база: одна таблица, без синхронизации.
+ *
+ * Папок больше нет: категоризация держится на цвете, а два главных экрана —
+ * это флаг [archived] у самой заметки, а не вложенность.
  */
 internal class NoteDatabase(context: Context) : SQLiteOpenHelper(context, NAME, null, VERSION) {
 
@@ -17,27 +19,17 @@ internal class NoteDatabase(context: Context) : SQLiteOpenHelper(context, NAME, 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
-            CREATE TABLE folders (
-                _id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            )
-            """.trimIndent(),
-        )
-        db.execSQL(
-            """
             CREATE TABLE notes (
                 _id INTEGER PRIMARY KEY AUTOINCREMENT,
-                folder_id INTEGER NOT NULL REFERENCES folders(_id) ON DELETE CASCADE,
                 title TEXT NOT NULL DEFAULT '',
                 body TEXT NOT NULL DEFAULT '',
                 color TEXT NOT NULL DEFAULT 'default',
+                archived INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )
             """.trimIndent(),
         )
-        db.execSQL("CREATE INDEX idx_notes_folder ON notes(folder_id)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -55,10 +47,37 @@ internal class NoteDatabase(context: Context) : SQLiteOpenHelper(context, NAME, 
                 """.trimIndent(),
             )
         }
+        if (oldVersion < 3) {
+            // Папки убраны: заметки из них переезжают на рабочий экран.
+            // Таблица пересобирается целиком, потому что из неё уходит
+            // внешний ключ на folders и добавляется флаг архива.
+            db.execSQL(
+                """
+                CREATE TABLE notes_v3 (
+                    _id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL DEFAULT '',
+                    body TEXT NOT NULL DEFAULT '',
+                    color TEXT NOT NULL DEFAULT 'default',
+                    archived INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                """
+                INSERT INTO notes_v3 (_id, title, body, color, archived, created_at, updated_at)
+                SELECT _id, title, body, color, 0, created_at, updated_at FROM notes
+                """.trimIndent(),
+            )
+            db.execSQL("DROP TABLE notes")
+            db.execSQL("DROP TABLE IF EXISTS folders")
+            db.execSQL("ALTER TABLE notes_v3 RENAME TO notes")
+        }
     }
 
     companion object {
         const val NAME = "onlynote.db"
-        const val VERSION = 2
+        const val VERSION = 3
     }
 }

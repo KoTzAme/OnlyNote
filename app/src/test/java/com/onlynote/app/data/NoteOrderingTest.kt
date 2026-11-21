@@ -1,4 +1,4 @@
-﻿package com.onlynote.app.data
+package com.onlynote.app.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -11,9 +11,9 @@ class NoteOrderingTest {
         id: Long = body.hashCode().toLong(),
     ): Note = Note(
         id = id,
-        folderId = 1L,
         body = body,
         color = color,
+        archived = false,
         createdAt = 0L,
         updatedAt = 0L,
     )
@@ -97,13 +97,35 @@ class NoteOrderingTest {
     fun `backup json survives a round trip`() {
         val data = BackupData(
             createdAt = 123L,
-            folders = listOf(BackupFolder("Кошки", 1L)),
             notes = listOf(
-                BackupNote(folderIndex = 0, body = "Сфинкс\nпервая строка", color = "rose", createdAt = 2L, updatedAt = 3L),
+                BackupNote(
+                    body = "Сфинкс\nпервая строка",
+                    color = "rose",
+                    archived = true,
+                    createdAt = 2L,
+                    updatedAt = 3L,
+                ),
             ),
         )
         val restored = BackupData.fromJson(data.toJson())
         assertEquals(data, restored)
+    }
+
+    @Test
+    fun `backup of version 1 without archive is read as work notes`() {
+        val legacy = """
+            {
+              "format": "onlynote-backup",
+              "version": 1,
+              "createdAt": 5,
+              "folders": [{"name": "Кошки", "createdAt": 1}],
+              "notes": [{"folder": 0, "body": "Сфинкс", "color": "rose", "createdAt": 2, "updatedAt": 3}]
+            }
+        """.trimIndent()
+        val restored = BackupData.fromJson(legacy)
+        assertEquals(1, restored?.notes?.size)
+        assertEquals("Сфинкс", restored?.notes?.first()?.body)
+        assertEquals(false, restored?.notes?.first()?.archived)
     }
 
     @Test

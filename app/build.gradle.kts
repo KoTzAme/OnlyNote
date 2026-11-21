@@ -12,33 +12,28 @@ android {
         applicationId = "com.onlynote.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 47
-        versionName = "1.0a"
+        versionCode = 48
+        versionName = "1.1"
     }
 
-    // Ключа в репозитории нет. Если задать переменные окружения
-    // ONLYNOTE_KEYSTORE (путь к .jks), ONLYNOTE_STORE_PASSWORD, ONLYNOTE_KEY_ALIAS
-    // и ONLYNOTE_KEY_PASSWORD — release подпишется; иначе соберётся неподписанным.
-    val keystorePath: String? = System.getenv("ONLYNOTE_KEYSTORE")
     signingConfigs {
-        if (keystorePath != null) {
-            create("release") {
-                storeFile = file(keystorePath)
-                storePassword = System.getenv("ONLYNOTE_STORE_PASSWORD")
-                keyAlias = System.getenv("ONLYNOTE_KEY_ALIAS")
-                keyPassword = System.getenv("ONLYNOTE_KEY_PASSWORD")
-            }
+        create("local") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "onlynote"
+            keyPassword = "android"
         }
     }
 
     buildTypes {
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("local")
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.findByName("release")
+            signingConfig = signingConfigs.getByName("local")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

@@ -104,6 +104,12 @@ private const val NOTICE_MS = 2_200L
 /** Мигание курсора: полсекунды виден, полсекунды нет — как у платформы. */
 private const val CARET_BLINK_MS = 500L
 
+/** Полоса у верхнего и нижнего края, в которой выделение тянет текст за собой. */
+private const val SELECTION_EDGE_ZONE_DP = 40f
+
+/** Предел автопрокрутки за кадр — иначе у самого края текст улетал бы прыжком. */
+private const val SELECTION_EDGE_STEP_DP = 14f
+
 /**
  * Поле заметки на всё содержимое сразу — настоящее [EditText].
  *
@@ -187,6 +193,9 @@ internal class NoteEditText(context: Context) : EditText(context) {
     private var gestureScroll = false
     private var handScroll = false
     private var lastY = 0f
+    /** Автопрокрутка выделения: включена, пока палец в полосе у края. */
+    private var selectionScrolling = false
+    private var selectionScrollDepth = 0f
     private val minFlingVelocity by lazy {
         ViewConfiguration.get(context).scaledMinimumFlingVelocity
     }
@@ -334,6 +343,10 @@ internal class NoteEditText(context: Context) : EditText(context) {
         }
         modeEditable = editable
         if (editable) {
+            // Свайп мог оставить текст в полёте. Инерция каждый кадр переписывает
+            // прокрутку и гасила прыжок к концу заметки: тап по шапке во время
+            // прокрутки не доводил до конца. Останавливаем полёт до перехода.
+            if (!flingScroller.isFinished) flingScroller.forceFinished(true)
             // Поле остаётся выделяемым и в правке: иначе долгое нажатие не
             // выделяет слово и не показывает «Копировать / Выбрать всё».
             setTextIsSelectable(true)
@@ -364,6 +377,11 @@ internal class NoteEditText(context: Context) : EditText(context) {
     }
 
     fun isModeEditable(): Boolean = modeEditable
+
+    /** Останавливает инерцию прокрутки: прыжок к курсору должен победить полёт. */
+    fun finishFling() {
+        if (!flingScroller.isFinished) flingScroller.forceFinished(true)
+    }
 
     fun setBottomFade(visible: Boolean) {
         if (bottomFadeVisible == visible) return
@@ -693,8 +711,70 @@ internal class NoteEditText(context: Context) : EditText(context) {
      * последней строкой сбрасывался в ноль: текст прилипал к разделителю,
      * а внизу возвращалась чёрная полоса. Строку курсора двигаем сами
      * ([ensureCaretVisible]), поэтому платформенную подтяжку выключаем.
+     *
+     * Исключение — выделение: пока человек тянет ручку, поле должно ехать
+     * за ручкой, иначе, дойдя до края, выделение останавливается и дальше
+     * текст не выделить.
      */
-    override fun bringPointIntoView(offset: Int): Boolean = false
+    override fun bringPointIntoView(offset: Int): Boolean =
+        if (selectionStart != selectionEnd) super.bringPointIntoView(offset) else false
+
+    /**
+     * Автопрокрутка при перетаскивании ручки выделения.
+     *
+     * Ручку двигает платформа, и её касания не доходят до [onTouchEvent] — они
+     * разбираются в контроллере выделения. Поэтому смотрим на события уровнем
+     * выше, в [dispatchTouchEvent]: пока палец в полосе у верхнего или нижнего
+     * края, каждый кадр подкручиваем текст в ту же сторону. Без этого выделение
+     * упиралось в край экрана и останавливалось.
+     */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> updateSelectionAutoScroll(event.y)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> stopSelectionAutoScroll()
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun updateSelectionAutoScroll(y: Float) {
+        // Полоса нужна только выделению: обычная прокрутка идёт своим жестом.
+        if (selectionStart == selectionEnd) {
+            stopSelectionAutoScroll()
+            return
+        }
+        val zone = SELECTION_EDGE_ZONE_DP * resources.displayMetrics.density
+        val depth = when {
+            y < zone -> (y - zone) / zone
+            y > height - zone -> (y - (height - zone)) / zone
+            else -> 0f
+        }
+        selectionScrollDepth = depth
+        if (depth != 0f) {
+            if (!selectionScrolling) {
+                selectionScrolling = true
+                postOnAnimation(selectionScrollTick)
+            }
+        } else {
+            stopSelectionAutoScroll()
+        }
+    }
+
+    private fun stopSelectionAutoScroll() {
+        selectionScrolling = false
+        selectionScrollDepth = 0f
+        removeCallbacks(selectionScrollTick)
+    }
+
+    private val selectionScrollTick = object : Runnable {
+        override fun run() {
+            if (!selectionScrolling) return
+            val density = resources.displayMetrics.density
+            val step = (selectionScrollDepth * SELECTION_EDGE_STEP_DP * density).toInt()
+            val target = (scrollY + step).coerceIn(scrollMinPx(), scrollMaxPx())
+            if (target != scrollY) scrollTo(0, target)
+            postOnAnimation(this)
+        }
+    }
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
@@ -842,6 +922,8 @@ internal class NoteEditText(context: Context) : EditText(context) {
                     }
                     return true
                 }
+                // Выделение, дойдя до края, должно тянуть текст за собой.
+                if (selectionStart != selectionEnd) updateSelectionAutoScroll(event.y)
             }
 
             MotionEvent.ACTION_UP -> {
@@ -1143,6 +1225,9 @@ internal class NoteFieldController(private val initialText: String) {
         }
         editable = true
         field.applyMode(true)
+        // Полёт инерции идёт по своим координатам и перебивает прыжок к курсору,
+        // поэтому гасим его ещё раз прямо перед постановкой каретки.
+        field.finishFling()
         field.suppressThumb(700)
         field.post {
             field.requestFocus()

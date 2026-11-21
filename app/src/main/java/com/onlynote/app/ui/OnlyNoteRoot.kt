@@ -1,6 +1,5 @@
 package com.onlynote.app.ui
 
-import android.content.Context
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
@@ -10,11 +9,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -23,10 +19,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -35,28 +27,22 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.onlynote.app.data.BackupEntry
 import com.onlynote.app.R
-import com.onlynote.app.data.Folder
+import com.onlynote.app.data.BackupEntry
 import com.onlynote.app.ui.components.BackupDialog
-import com.onlynote.app.ui.components.ConfirmDialog
 import com.onlynote.app.ui.components.BackupFeedback
-import com.onlynote.app.ui.components.FolderNameBar
-import com.onlynote.app.ui.components.FolderPickerContent
+import com.onlynote.app.ui.components.ConfirmDialog
 import com.onlynote.app.ui.components.WindowScrim
 import com.onlynote.app.ui.screens.EditorScreen
-import com.onlynote.app.ui.theme.HOME_SCALE
 import com.onlynote.app.ui.screens.HomeScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Настройки интерфейса, которые должны пережить перезапуск. */
-private const val UI_PREFS = "onlynote-ui"
-private const val KEY_EXPANDED = "expanded_folders"
-
 /**
  * Переход: 220 мс на экране, одинаково для любой заметки и в обе стороны.
+ * Той же длительностью ходит и страница главного экрана.
  *
  * Длительность хода не зависит от размера заметки: пауза на вёрстку поля —
  * это ожидание перед ходом, а не часть хода, иначе на большой заметке
@@ -71,29 +57,26 @@ private const val SLIDE_MS = 220
 /** Потолок паузы перед ходом: длиннее ждать нельзя ни на входе, ни на выходе. */
 private const val MAX_ENTRY_PAUSE_MS = 400L
 
-
 private sealed interface Destination {
     data object Home : Destination
     data class Editor(val noteId: Long, val isNew: Boolean) : Destination
 }
 
-private sealed interface FolderDialog {
-    data object New : FolderDialog
-    data class Rename(val folder: Folder) : FolderDialog
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OnlyNoteRoot(viewModel: OnlyNoteViewModel = viewModel()) {
     val snapshot by viewModel.snapshot.collectAsState()
     val stack = remember { mutableStateListOf<Destination>(Destination.Home) }
     val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences(UI_PREFS, Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
 
-    // Позиция списка живёт здесь, а не в HomeScreen: на время перехода дом
-    // собирается заново, и без этого возврат показывал бы начало списка.
-    val homeListState = rememberLazyListState()
+    // Позиции списков и текущий экран живут здесь, а не в HomeScreen: на время
+    // перехода дом собирается заново, и без этого возврат показывал бы начало
+    // списка и первый экран.
+    val workListState = rememberLazyListState()
+    val archiveListState = rememberLazyListState()
+    // Текущая страница живёт здесь: пока открыта заметка, дом выпадает
+    // из композиции, и без этого возврат из архива показывал бы рабочий экран.
+    val homePager = rememberPagerState(initialPage = 0) { 2 }
 
     // 0 — на экране список, 1 — заметка. Пока идёт переход, видны оба слоя:
     // список уезжает влево, заметка входит справа.
@@ -114,20 +97,6 @@ fun OnlyNoteRoot(viewModel: OnlyNoteViewModel = viewModel()) {
             .coerceIn(0.05f, 10f)
     }
 
-    // Открытые папки переживают перезапуск: помним их по id.
-    val expandedFolders = remember {
-        mutableStateListOf<Long>().apply {
-            addAll(prefs.getStringSet(KEY_EXPANDED, emptySet()).orEmpty().mapNotNull { it.toLongOrNull() })
-        }
-    }
-
-    fun persistExpanded() {
-        prefs.edit().putStringSet(KEY_EXPANDED, expandedFolders.map { it.toString() }.toSet()).apply()
-    }
-
-    var folderDialog by remember { mutableStateOf<FolderDialog?>(null) }
-    var newNoteSheetOpen by remember { mutableStateOf(false) }
-
     var backupOpen by remember { mutableStateOf(false) }
     var autoBackup by remember { mutableStateOf<BackupEntry?>(null) }
     var documentBackups by remember { mutableStateOf<List<BackupEntry>>(emptyList()) }
@@ -141,20 +110,6 @@ fun OnlyNoteRoot(viewModel: OnlyNoteViewModel = viewModel()) {
             autoBackup = auto
             documentBackups = documents
         }
-    }
-
-    fun expand(folderId: Long) {
-        if (folderId !in expandedFolders) {
-            expandedFolders.add(folderId)
-            persistExpanded()
-        }
-    }
-
-    // Папку могли удалить импортом копии — забываем несуществующие id.
-    LaunchedEffect(snapshot.folders) {
-        if (snapshot.folders.isEmpty()) return@LaunchedEffect
-        val alive = snapshot.folders.map { it.id }.toSet()
-        if (expandedFolders.retainAll(alive)) persistExpanded()
     }
 
     /** Гонит прогресс к цели; по окончании закрывает за собой. */
@@ -194,9 +149,6 @@ fun OnlyNoteRoot(viewModel: OnlyNoteViewModel = viewModel()) {
 
     /**
      * Выход: та же пауза и тот же ход назад, и только потом стек снимает заметку.
-     *
-     * Пауза нужна не «для красоты»: вход тоже стоит ровно столько, пока
-     * раскладывается поле, и без неё выход получался короче входа.
      */
     fun closeEditor() {
         if (sliding || stack.size <= 1) return
@@ -223,29 +175,21 @@ fun OnlyNoteRoot(viewModel: OnlyNoteViewModel = viewModel()) {
 
     BackHandler(enabled = stack.size > 1 && !sliding) { closeEditor() }
 
-    fun createNoteIn(folderId: Long) {
-        expand(folderId)
-        viewModel.createNote(folderId) { noteId ->
-            openEditor(Destination.Editor(noteId = noteId, isNew = true))
-        }
-    }
-
-    /** Создание всегда через один «+»: либо в существующую папку, либо с новой папкой. */
-    fun requestNewNote() {
-        if (snapshot.folders.isEmpty()) {
-            folderDialog = FolderDialog.New
-        } else {
-            newNoteSheetOpen = true
-        }
-    }
-
-    // Набор открытых папок пересобирается только когда он реально изменился.
-    val expandedIds = remember(expandedFolders.toList()) { expandedFolders.toSet() }
-
     // Дом рисуется всегда, заметка — поверх него. Так экран заметки не
     // пересоздаётся при каждом возврате, и любой будущий переход между ними
     // будет двигать готовые слои, а не собирать второй экран с нуля.
     val editor = stack.lastOrNull() as? Destination.Editor
+
+    // Пустую новую заметку при выходе удаляют, и на миг экран остаётся без
+    // неё: слой заметки уже нечего рисовать, а дом ещё скрыт перекрытием —
+    // получался чёрный экран. Снимаем такую вершину сразу, как только заметки
+    // не стало, не дожидаясь хода.
+    LaunchedEffect(editor?.noteId, snapshot.notes.size) {
+        val current = stack.lastOrNull() as? Destination.Editor ?: return@LaunchedEffect
+        if (snapshot.notes.none { it.id == current.noteId } && !sliding) {
+            stack.removeAt(stack.lastIndex)
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Дом компонуется, пока заметка закрыта, и ещё на время перехода:
@@ -256,24 +200,28 @@ fun OnlyNoteRoot(viewModel: OnlyNoteViewModel = viewModel()) {
             modifier = Modifier.graphicsLayer {
                 if (editor != null) translationX = -size.width * slideProgress
             },
-            listState = homeListState,
+            workListState = workListState,
+            archiveListState = archiveListState,
+            pagerState = homePager,
             snapshot = snapshot,
-            expandedFolderIds = expandedIds,
-            onToggleFolder = { folderId ->
-                if (!expandedFolders.remove(folderId)) expandedFolders.add(folderId)
-                persistExpanded()
-            },
             onOpenNote = { note ->
                 openEditor(Destination.Editor(noteId = note.id, isNew = false))
             },
             onDeleteNote = { note -> viewModel.deleteNote(note.id) },
-            onRenameFolder = { folder -> folderDialog = FolderDialog.Rename(folder) },
+            // Полоска — единственная категория: она и перекладывает заметку
+            // на другой главный экран.
+            onMoveNote = { note -> viewModel.setArchived(note.id, !note.archived) },
             onOpenBackup = {
                 backupFeedback = BackupFeedback.None
                 backupOpen = true
                 reloadBackups()
             },
-            onNewNote = { requestNewNote() },
+            // Заметка появляется на том экране, где её создали.
+            onNewNote = { archived ->
+                viewModel.createNote(archived) { noteId ->
+                    openEditor(Destination.Editor(noteId = noteId, isNew = true))
+                }
+            },
         )
 
         if (editor != null) {
@@ -299,7 +247,6 @@ fun OnlyNoteRoot(viewModel: OnlyNoteViewModel = viewModel()) {
             ) {
                 EditorScreen(
                     note = note,
-                    folderName = snapshot.folder(note.folderId)?.name.orEmpty(),
                     isNew = editor.isNew,
                     onBack = { closeEditor() },
                     onSave = { body -> viewModel.saveNote(note.id, body) },
@@ -324,63 +271,8 @@ fun OnlyNoteRoot(viewModel: OnlyNoteViewModel = viewModel()) {
                     },
             )
         }
-        // Опыт 4.9: под окнами и меню экран гаснет в ноль. Затемнение живёт
-        // внутри этой же сцены, перед строкой имени: иначе слой закрыл бы её
-        // саму — она не окно, а строка ввода поверх клавиатуры.
-        WindowScrim(
-            visible = backupOpen || importCandidate != null ||
-                newNoteSheetOpen || folderDialog != null,
-        )
-
-        when (val dialog = folderDialog) {
-            null -> Unit
-
-            FolderDialog.New -> FolderNameBar(
-                existingNames = snapshot.folders.map { it.name },
-                onDismiss = { folderDialog = null },
-                onConfirm = { name ->
-                    folderDialog = null
-                    viewModel.createFolder(name) { folderId -> createNoteIn(folderId) }
-                },
-            )
-
-            is FolderDialog.Rename -> FolderNameBar(
-                initialValue = dialog.folder.name,
-                existingNames = snapshot.folders.filter { it.id != dialog.folder.id }.map { it.name },
-                onDismiss = { folderDialog = null },
-                onConfirm = { name ->
-                    folderDialog = null
-                    viewModel.renameFolder(dialog.folder.id, name)
-                },
-            )
-        }
-    }
-
-    if (newNoteSheetOpen) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
-            onDismissRequest = { newNoteSheetOpen = false },
-            sheetState = sheetState,
-            containerColor = MaterialTheme.colorScheme.surface,
-            // Прямые углы: скруглений в приложении нет нигде.
-            shape = RectangleShape,
-            // Без серой «ручки» сверху: на чёрном она единственное светлое пятно
-            // и читается как отдельная плашка над листом.
-            dragHandle = null,
-        ) {
-            FolderPickerContent(
-                folders = snapshot.folders,
-                onPick = { folderId ->
-                    newNoteSheetOpen = false
-                    createNoteIn(folderId)
-                },
-                // Лист закрываем до окна новой папки: иначе он висел бы позади него.
-                onNewFolder = {
-                    newNoteSheetOpen = false
-                    folderDialog = FolderDialog.New
-                },
-            )
-        }
+        // Опыт 4.9: под окнами и меню экран гаснет в ноль.
+        WindowScrim(visible = backupOpen || importCandidate != null)
     }
 
     if (backupOpen) {

@@ -50,7 +50,7 @@ class BackupStore(context: Context) {
             if (fresh) return@runCatching
             val data = store.readForBackup()
             // Нечего сохранять — не пишем и пустой каркас.
-            if (data.folders.isEmpty() && data.notes.isEmpty()) return@runCatching
+            if (data.notes.isEmpty()) return@runCatching
             file.parentFile?.mkdirs()
             file.writeText(data.toJson())
         }
