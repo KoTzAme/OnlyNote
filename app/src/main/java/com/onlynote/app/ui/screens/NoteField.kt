@@ -104,12 +104,6 @@ private const val NOTICE_MS = 2_200L
 /** Мигание курсора: полсекунды виден, полсекунды нет — как у платформы. */
 private const val CARET_BLINK_MS = 500L
 
-/** Полоса у верхнего и нижнего края, в которой выделение тянет текст за собой. */
-private const val SELECTION_EDGE_ZONE_DP = 40f
-
-/** Предел автопрокрутки за кадр — иначе у самого края текст улетал бы прыжком. */
-private const val SELECTION_EDGE_STEP_DP = 14f
-
 /**
  * Поле заметки на всё содержимое сразу — настоящее [EditText].
  *
@@ -193,9 +187,6 @@ internal class NoteEditText(context: Context) : EditText(context) {
     private var gestureScroll = false
     private var handScroll = false
     private var lastY = 0f
-    /** Автопрокрутка выделения: включена, пока палец в полосе у края. */
-    private var selectionScrolling = false
-    private var selectionScrollDepth = 0f
     private val minFlingVelocity by lazy {
         ViewConfiguration.get(context).scaledMinimumFlingVelocity
     }
@@ -235,7 +226,10 @@ internal class NoteEditText(context: Context) : EditText(context) {
         imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_ENTER_ACTION
         isVerticalScrollBarEnabled = false
         overScrollMode = OVER_SCROLL_NEVER
-        importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        // Автозаполнение появилось в 26; на старых системах его просто нет.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        }
         // Поле не должно восстанавливать текст из состояния вида: источник правды — база.
         isSaveEnabled = false
         isFocusableInTouchMode = true
@@ -476,36 +470,6 @@ internal class NoteEditText(context: Context) : EditText(context) {
         }
     }
 
-    /**
-     * Прячет платформенные «капли» — ручку вставки и ручки выделения.
-     *
-     * Текст двигаем мы сами (`handScroll`, инерция), платформа об этом не знает:
-     * её ручка остаётся на старом месте, висит поверх текста и может вылезти за
-     * цветной разделитель — она рисуется вне поля. Своего курсора у нас хватает,
-     * поэтому чужие ручки убираем, как только начинается движение.
-     */
-    private fun hidePlatformHandles() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
-        try {
-            val editorField = android.widget.TextView::class.java
-                .getDeclaredField("mEditor")
-                .apply { isAccessible = true }
-            val editor = editorField.get(this) ?: return
-            val controllerNames = arrayOf(
-                "mInsertionPointCursorController",
-                "mSelectionModifierCursorController",
-            )
-            for (name in controllerNames) {
-                val field = editor.javaClass.getDeclaredField(name).apply { isAccessible = true }
-                val controller = field.get(editor) ?: continue
-                controller.javaClass.getMethod("hide").invoke(controller)
-            }
-        } catch (_: Throwable) {
-            // Внутренности платформы могут отличаться от ожидаемых: без них
-            // просто остаётся стандартное поведение.
-        }
-    }
-
     /** Курсор рисуем сами: у платформенного в этой теме своя жизнь и свой цвет. */
     private fun drawCaret(canvas: Canvas) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
@@ -710,72 +674,21 @@ internal class NoteEditText(context: Context) : EditText(context) {
      * границам (0…layoutH − height). Из-за этого воздух над первой и под
      * последней строкой сбрасывался в ноль: текст прилипал к разделителю,
      * а внизу возвращалась чёрная полоса. Строку курсора двигаем сами
-     * ([ensureCaretVisible]), поэтому платформенную подтяжку выключаем.
+     * ([ensureCaretVisible]), поэтому платформенную подтяжку выключаем совсем.
      *
-     * Исключение — выделение: пока человек тянет ручку, поле должно ехать
-     * за ручкой, иначе, дойдя до края, выделение останавливается и дальше
-     * текст не выделить.
+     * Выделение при этом остаётся в пределах видимого: текст под протяжкой
+     * ручки не прокручивается. Так решено сознательно — своя прокрутка у
+     * кромки пробовалась и отвергнута как сырая (см. STATE.md).
      */
-    override fun bringPointIntoView(offset: Int): Boolean =
-        if (selectionStart != selectionEnd) super.bringPointIntoView(offset) else false
+    override fun bringPointIntoView(offset: Int): Boolean = false
 
     /**
-     * Автопрокрутка при перетаскивании ручки выделения.
-     *
-     * Ручку двигает платформа, и её касания не доходят до [onTouchEvent] — они
-     * разбираются в контроллере выделения. Поэтому смотрим на события уровнем
-     * выше, в [dispatchTouchEvent]: пока палец в полосе у верхнего или нижнего
-     * края, каждый кадр подкручиваем текст в ту же сторону. Без этого выделение
-     * упиралось в край экрана и останавливалось.
+     * Касания капли до поля не доходят: платформа держит капли отдельными
+     * окнами (`PopupWindow`) и разбирает их сама. Поэтому выделение тянется
+     * только на то, что видно, — и это сознательное решение, а не недоделка:
+     * своя реализация капель (рисование, попадание пальцем, панель, снятие
+     * выделения) была сделана и отвергнута как сырая.
      */
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> updateSelectionAutoScroll(event.y)
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> stopSelectionAutoScroll()
-        }
-        return super.dispatchTouchEvent(event)
-    }
-
-    private fun updateSelectionAutoScroll(y: Float) {
-        // Полоса нужна только выделению: обычная прокрутка идёт своим жестом.
-        if (selectionStart == selectionEnd) {
-            stopSelectionAutoScroll()
-            return
-        }
-        val zone = SELECTION_EDGE_ZONE_DP * resources.displayMetrics.density
-        val depth = when {
-            y < zone -> (y - zone) / zone
-            y > height - zone -> (y - (height - zone)) / zone
-            else -> 0f
-        }
-        selectionScrollDepth = depth
-        if (depth != 0f) {
-            if (!selectionScrolling) {
-                selectionScrolling = true
-                postOnAnimation(selectionScrollTick)
-            }
-        } else {
-            stopSelectionAutoScroll()
-        }
-    }
-
-    private fun stopSelectionAutoScroll() {
-        selectionScrolling = false
-        selectionScrollDepth = 0f
-        removeCallbacks(selectionScrollTick)
-    }
-
-    private val selectionScrollTick = object : Runnable {
-        override fun run() {
-            if (!selectionScrolling) return
-            val density = resources.displayMetrics.density
-            val step = (selectionScrollDepth * SELECTION_EDGE_STEP_DP * density).toInt()
-            val target = (scrollY + step).coerceIn(scrollMinPx(), scrollMaxPx())
-            if (target != scrollY) scrollTo(0, target)
-            postOnAnimation(this)
-        }
-    }
-
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
         restartCaretBlink()
@@ -901,8 +814,6 @@ internal class NoteEditText(context: Context) : EditText(context) {
                     selectionStart == selectionEnd
                 ) {
                     handScroll = true
-                    // Движение начинается — платформенные ручки убираем сразу.
-                    hidePlatformHandles()
                     cancelLongPress()
                     val cancel = MotionEvent.obtain(event)
                     cancel.action = MotionEvent.ACTION_CANCEL
@@ -922,8 +833,6 @@ internal class NoteEditText(context: Context) : EditText(context) {
                     }
                     return true
                 }
-                // Выделение, дойдя до края, должно тянуть текст за собой.
-                if (selectionStart != selectionEnd) updateSelectionAutoScroll(event.y)
             }
 
             MotionEvent.ACTION_UP -> {
@@ -975,7 +884,6 @@ internal class NoteEditText(context: Context) : EditText(context) {
         if (!gestureScroll) return
         if (selectionStart != selectionEnd) return
         if (abs(velocityY) < minFlingVelocity) return
-        hidePlatformHandles()
         val min = scrollMinPx()
         val max = scrollMaxPx()
         if (max <= min) return

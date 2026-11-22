@@ -30,7 +30,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -282,6 +285,16 @@ private fun NotesPage(
     // Высота распорки считается от экрана, а не от вьюпорта списка.
     val screenHeight = LocalConfiguration.current.screenHeightDp
     val density = LocalDensity.current
+    // Пока заметки не заполнили экран, список не должен прокручиваться вовсе:
+    // распорку в конце добавляем только тогда, когда без неё до конца не
+    // долистать. Иначе короткий список «пружинил» на пару сантиметров.
+    var viewportHeight by remember { mutableIntStateOf(0) }
+    val layoutInfo by remember { derivedStateOf { listState.layoutInfo } }
+    val rowHeight = layoutInfo.visibleItemsInfo
+        .firstOrNull { it.key != "tail" }
+        ?.size ?: 0
+    val fitsScreen = viewportHeight > 0 && rowHeight > 0 &&
+        rowHeight * notes.size <= viewportHeight
     val tailHeight = remember(screenHeight) {
         with(density) { (screenHeight * 0.4f).dp }
     }
@@ -299,9 +312,11 @@ private fun NotesPage(
             .semantics { contentDescription = emptyHint },
     ) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .onSizeChanged { viewportHeight = it.height },
             state = listState,
-            contentPadding = PaddingValues(bottom = STEP),
+            contentPadding = if (fitsScreen) PaddingValues(0.dp) else PaddingValues(bottom = STEP),
         ) {
             items(notes, key = { note -> note.id }) { note ->
                 NoteRow(
@@ -312,7 +327,9 @@ private fun NotesPage(
                     modifier = Modifier.animateItem(),
                 )
             }
-            if (notes.isNotEmpty()) {
+            // Хвостовая пустота нужна только длинному списку: короткий и так
+            // целиком виден, а пустое место под ним даёт фон страницы.
+            if (notes.isNotEmpty() && !fitsScreen) {
                 item(key = "tail") {
                     Box(
                         modifier = Modifier

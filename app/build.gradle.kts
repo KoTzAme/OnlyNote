@@ -12,16 +12,21 @@ android {
         applicationId = "com.onlynote.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 48
-        versionName = "1.1"
+        versionCode = 49
+        versionName = "1.2"
     }
 
     signingConfigs {
         create("local") {
-            storeFile = rootProject.file("keystore/debug.keystore")
-            storePassword = "android"
-            keyAlias = "onlynote"
-            keyPassword = "android"
+            // Ключ в репозиторий не кладём: если его нет, релиз соберётся
+            // неподписанным, а debug подпишется отладочным ключом системы.
+            val store = rootProject.file("keystore/debug.keystore")
+            if (store.exists()) {
+                storeFile = store
+                storePassword = System.getenv("ONLYNOTE_STORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("ONLYNOTE_KEY_ALIAS") ?: "onlynote"
+                keyPassword = System.getenv("ONLYNOTE_KEY_PASSWORD") ?: "android"
+            }
         }
     }
 
@@ -54,8 +59,31 @@ android {
         compose = true
     }
 
+    defaultConfig {
+        // Приложение только на русском: переводы AndroidX на девяносто языков
+        // лежат в resources.arsc и там же остаются, если их не отсечь.
+        resourceConfigurations += listOf("ru")
+        // Только 64 бита: 32-битные устройства больше не поддерживаем — это
+        // отдельная копия libandroidx.graphics.path.so в APK.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+    }
+
     packaging {
-        resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
+        resources.excludes += setOf(
+            "/META-INF/{AL2.0,LGPL2.1}",
+            "DebugProbesKt.bin",
+            "kotlin-tooling-metadata.json",
+            "/META-INF/*.version",
+            "/META-INF/*.kotlin_module",
+            // Метаданные Kotlin нужны только kotlin-reflect, которого в APK нет.
+            "kotlin/**",
+            // Профиль депт-оптимизации нужен системе, а не приложению: с ним
+            // запуск чуть быстрее, но лежит он в assets и весит 6 КБ.
+            "assets/dexopt/baseline.prof",
+            "assets/dexopt/baseline.profm",
+        )
     }
 }
 
@@ -71,7 +99,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-core")
     // ui-tooling и ui-tooling-preview не нужны: @Preview в проекте нет,
     // а debug-сборка с ними весит на восемь мегабайт больше.
 

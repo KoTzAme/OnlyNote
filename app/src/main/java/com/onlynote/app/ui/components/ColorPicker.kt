@@ -12,16 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -104,17 +98,7 @@ private fun ColorSwatch(
                 .border(width = 1.dp, color = MaterialTheme.colorScheme.outline)
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
-        ) {
-            if (selected) {
-                Icon(
-                    imageVector = Icons.Filled.Check,
-                    contentDescription = null,
-                    // На светлой плитке галочка чёрная, на тёмной — белая.
-                    tint = if (skin.accent.luminance() > 0.55f) Color(0xFF101010) else Color(0xFFFFFFFF),
-                    modifier = Modifier.size(14.dp),
-                )
-            }
-        }
+        ) {}
     }
 }
 

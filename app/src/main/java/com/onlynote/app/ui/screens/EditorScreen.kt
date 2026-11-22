@@ -20,12 +20,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -64,6 +60,8 @@ import com.onlynote.app.data.Note
 import com.onlynote.app.data.NoteColor
 import com.onlynote.app.data.noteHeading
 import com.onlynote.app.ui.components.ColorPickerContent
+import com.onlynote.app.ui.components.ChevronDown
+import com.onlynote.app.ui.components.ChevronUp
 import com.onlynote.app.ui.components.EditHistory
 import com.onlynote.app.ui.components.WindowScrim
 import com.onlynote.app.ui.theme.SECONDARY_ALPHA
@@ -188,7 +186,7 @@ fun EditorScreen(
     // Колбэки поля переназначаются на каждой пересборке: они читают свежие состояния.
     field.onTextChanged = { previous, next ->
         docText.value = next
-        if (history.shouldRecord()) history.record(previous)
+        history.onChanged(previous, next)
         val line = next.noteHeading()
         if (heading.value != line) heading.value = line
     }
@@ -528,19 +526,15 @@ private fun SearchBar(
             color = textColor.copy(alpha = SECONDARY_ALPHA),
         )
         IconButton(onClick = onPrev, enabled = total > 0) {
-            Icon(
-                imageVector = Icons.Filled.KeyboardArrowUp,
-                contentDescription = stringResource(R.string.search_prev),
-                tint = textColor.copy(alpha = if (total > 0) 1f else 0.3f),
-                modifier = Modifier.size(20.dp),
+            ChevronUp(
+                color = textColor.copy(alpha = if (total > 0) 1f else 0.3f),
+                description = stringResource(R.string.search_prev),
             )
         }
         IconButton(onClick = onNext, enabled = total > 0) {
-            Icon(
-                imageVector = Icons.Filled.KeyboardArrowDown,
-                contentDescription = stringResource(R.string.search_next),
-                tint = textColor.copy(alpha = if (total > 0) 1f else 0.3f),
-                modifier = Modifier.size(20.dp),
+            ChevronDown(
+                color = textColor.copy(alpha = if (total > 0) 1f else 0.3f),
+                description = stringResource(R.string.search_next),
             )
         }
     }
